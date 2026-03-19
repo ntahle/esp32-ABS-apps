@@ -16,8 +16,129 @@ let alertCardCount = 0;
 let brokerStatus = "Disconnected";
 let esp32Status = "Unknown";
 let lastEsp32Seen = 0;
+let audioContext = null;
+let audioEnabled = false;
+let isBeeping = false;
+let audioHintShown = false;
+let unacknowledgedAlertCount = 0;
+let alarmIntervalId = null;
 
 const ESP32_TIMEOUT_MS = 20000;
+const ALERT_BEEP_REPEAT_MS = 200;
+
+function ensureAudioContext() {
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    return null;
+  }
+
+  if (!audioContext) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    audioContext = new AudioContextClass();
+  }
+
+  return audioContext;
+}
+
+function unlockAudio() {
+  const ctx = ensureAudioContext();
+  if (!ctx) {
+    return;
+  }
+
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {
+      // Ignore resume errors; user can retry with another interaction.
+    });
+  }
+
+  audioEnabled = true;
+  audioHintShown = false;
+}
+
+function playSingleBeep(frequency, durationMs, volume = 0.12) {
+  const ctx = ensureAudioContext();
+  if (!ctx || ctx.state !== "running") {
+    return;
+  }
+
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.type = "triangle";
+  oscillator.frequency.value = frequency;
+
+  const startTime = ctx.currentTime;
+  const endTime = startTime + durationMs / 1000;
+
+  gainNode.gain.setValueAtTime(0.0001, startTime);
+  gainNode.gain.exponentialRampToValueAtTime(volume, startTime + 0.01);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, endTime);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+
+  oscillator.start(startTime);
+  oscillator.stop(endTime + 0.01);
+}
+
+function playAlertBeep() {
+  if (isBeeping) {
+    return;
+  }
+
+  if (!audioEnabled) {
+    if (!audioHintShown) {
+      addHistoryEvent("audio", "Tap or click the page once to enable alert sound");
+      audioHintShown = true;
+    }
+    return;
+  }
+
+  const ctx = ensureAudioContext();
+  if (!ctx || ctx.state !== "running") {
+    return;
+  }
+
+  isBeeping = true;
+  playSingleBeep(1600, 120, 0.2);
+
+  setTimeout(() => {
+    playSingleBeep(1200, 120, 0.2);
+  }, 150);
+
+  setTimeout(() => {
+    playSingleBeep(820, 160, 0.2);
+  }, 300);
+
+  setTimeout(() => {
+    isBeeping = false;
+  }, 520);
+}
+
+function startAlarmLoop() {
+  if (alarmIntervalId) {
+    return;
+  }
+
+  playAlertBeep();
+  alarmIntervalId = setInterval(() => {
+    if (unacknowledgedAlertCount <= 0) {
+      stopAlarmLoop();
+      return;
+    }
+
+    playAlertBeep();
+  }, ALERT_BEEP_REPEAT_MS);
+}
+
+function stopAlarmLoop() {
+  if (!alarmIntervalId) {
+    return;
+  }
+
+  clearInterval(alarmIntervalId);
+  alarmIntervalId = null;
+}
 
 function statusClassFromValue(value) {
   const normalized = String(value || "").toLowerCase();
@@ -147,6 +268,14 @@ function sendAcknowledgementForCard(cardId, rawMessage) {
     ackLog.textContent = `Acknowledged - Sent: ${now.toLocaleString()}`;
     ackLog.classList.add("ack-sent");
     document.querySelector(`#${cardId} .ack-btn`).disabled = true;
+
+    if (unacknowledgedAlertCount > 0) {
+      unacknowledgedAlertCount--;
+    }
+    if (unacknowledgedAlertCount === 0) {
+      stopAlarmLoop();
+    }
+
     addHistoryEvent("sent", "Acknowledgment sent to MQTT broker");
   });
 }
@@ -228,6 +357,8 @@ function connectBroker() {
     if (topic === ESP32_TOPIC) {
       lastAlertMessage = message;
       addAlertCard(message);
+      unacknowledgedAlertCount++;
+      startAlarmLoop();
       addHistoryEvent("alert", "Bullying behavior alert received");
     }
 
@@ -260,11 +391,16 @@ function connectBroker() {
   client.on("close", () => {
     setStatus("Disconnected");
     updateEsp32Status("Unknown");
+    stopAlarmLoop();
   });
 }
 
 connectBroker();
 renderConnectionStatus();
+
+// Many browsers require a user interaction before audio playback is allowed.
+window.addEventListener("pointerdown", unlockAudio, { once: true });
+window.addEventListener("keydown", unlockAudio, { once: true });
 
 setInterval(() => {
   if (!client || !client.connected) {
