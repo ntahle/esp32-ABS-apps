@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Alert Acknowledge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <main class="phone-shell">
+        <h1>Intelligence Anti-Bully System Alert</h1>
+        <p class="description">Developed By Nursyafiq</p>
+        <div class="connection-bar">
+            <p id="status" class="status">Status: Disconnected</p>
+        </div>
+
+        <details class="event-log-dropdown">
+            <summary>Event Log</summary>
+            <div class="app-card app-card-log">
+                <div id="historyList" class="history-list">
+                    <p class="history-empty">No events yet.</p>
+                </div>
+            </div>
+        </details>
+
+        <div class="alerts-container" id="alertsContainer">
+            <p class="no-alerts">No alerts yet.</p>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="index.js"></script>
+</body>
+</html>
